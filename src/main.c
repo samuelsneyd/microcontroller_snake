@@ -70,6 +70,9 @@ unsigned int score = 0;
 bool game_over = false;
 bool turn_clockwise_flag = false;
 bool turn_counter_clockwise_flag = false;
+int speeds[] = { 50, 30, 20, 15 };
+char *difficulty_names[] = { "easy", "medium", "hard", "expert" };
+bool difficulty = 0;
 
 /**
  * Handles the left and right button presses prompt a turn of the snake.
@@ -166,8 +169,10 @@ void app_main() {
 
             // Draw score
             print_score(score);
+
+            // Draw and wait
             flip_frame();
-            vTaskDelay(20);
+            vTaskDelay(speeds[difficulty]);
         }
 
         // Game over
@@ -178,6 +183,9 @@ void app_main() {
     }
 }
 
+/**
+ * Prints the initial instructions before the game starts.
+ */
 void print_instructions() {
     setFont(FONT_DEJAVU18);
     draw_rectangle(0, 0, display_width, display_height, BLACK);
@@ -197,6 +205,9 @@ void print_instructions() {
     }
 }
 
+/**
+ * Draws the top score bar.
+ */
 void print_score() {
     setFont(FONT_SMALL);
     char scoreStr[20];
@@ -206,6 +217,9 @@ void print_score() {
     print_xy(scoreStr, 2, 2);
 }
 
+/**
+ * Draws a screen for the final score.
+ */
 void print_final_score() {
     setFont(FONT_DEJAVU24);
     char scoreStr[20];
@@ -221,7 +235,6 @@ void init_snake() {
     if (snake_tail != NULL) {
         free_snake();
     }
-    snake_tail = NULL;
     SnakeCell *new_cell = (SnakeCell *) malloc(sizeof(SnakeCell));
     new_cell->x = (X_LIMIT / 2) - 1;
     new_cell->y = Y_LIMIT / 2;
@@ -270,11 +283,10 @@ void draw_fruit() {
 }
 
 /**
- * Moves each snake segment.
+ * Moves each snake segment, tail -> head.
  */
 void move_snake() {
-    // Tail of the snake
-    if (snake_tail == NULL) {
+    if (snake_tail == NULL || snake_head == NULL) {
         return;
     }
     SnakeCell *old_tail = snake_tail;
@@ -308,7 +320,7 @@ void move_snake() {
     if (new_x == fruit.x && new_y == fruit.y) {
         // Fruit eaten, add new fruit and update score
         init_fruit();
-        score++;
+        score += SCORE_PER_FRUIT;
     } else {
         // Fruit not eaten, pop old tail
         snake_tail = old_tail->next;
@@ -317,7 +329,7 @@ void move_snake() {
 }
 
 /**
- * Deallocates all heap memory for the snake
+ * Deallocates all heap memory for the snake.
  */
 void free_snake() {
     while (snake_tail != NULL) {
@@ -330,7 +342,7 @@ void free_snake() {
 }
 
 /**
- * Prints out each cell in the snake for debugging
+ * Prints out each cell in the snake for debugging.
  */
 void print_snake() {
     int i = 0;
@@ -338,6 +350,7 @@ void print_snake() {
     while (current != NULL) {
         printf("cell %d, p: %p, x: %d, y: %d\n", i, current, current->x, current->y);
         current = current->next;
+        i++;
     }
     printf("\n");
 }
