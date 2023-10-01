@@ -13,14 +13,29 @@
 #define BLACK rgbToColour(0, 0, 0)
 #define WHITE rgbToColour(255, 255, 255)
 #define RED rgbToColour(255, 0, 0)
+#define GREEN rgbToColour(0, 255, 0)
 
-struct SnakeSegment
+void print_instructions();
+void print_score();
+void print_final_score();
+bool is_left_button_press();
+bool is_right_button_press();
+void init_snake();
+void move_snake();
+void draw_snake();
+void free_snake();
+void print_snake();
+void init_fruit();
+void draw_fruit();
+void check_collisions();
+
+struct SnakeCell
 {
     int x;
     int y;
-    int direction;
+    struct SnakeCell *next;
 };
-typedef struct SnakeSegment SnakeSegment;
+typedef struct SnakeCell SnakeCell;
 
 struct Fruit
 {
@@ -29,22 +44,35 @@ struct Fruit
 };
 typedef struct Fruit Fruit;
 
+const int PIXELS_PER_SEGMENT = 15;
+const int SCORE_PER_FRUIT = 1;
+const int BOUNDING_BOX_WIDTH = 135;
+const int BOUNDING_BOX_HEIGHT = 240 - 15;
+const int SCORE_PIXELS = 15;
+const int X_LIMIT = 9; // 135 / 15
+const int Y_LIMIT = 15; // (240 - 15) / 15
+const int SNAKE_SEGMENT_LIMIT = X_LIMIT * Y_LIMIT; // 135
 
-void print_instructions();
-void print_score(unsigned int score);
-void print_final_score(unsigned int score);
-bool is_left_button_press();
-bool is_right_button_press();
-void turn_clockwise();
-void turn_counter_clockwise();
-void init_snake();
-void draw_snake();
-void init_fruit();
-void draw_fruit();
-void move_snake();
+// Snake is a linked-list of cells
+// snake_tail is the head of the list
+// snake_head is the tail of the list
+// cell -> cell -> cell -> cell -> NULL
+// ^                       ^
+// |                       |
+// snake_tail              snake_head
+SnakeCell *snake_tail = NULL;
+SnakeCell *snake_head = NULL;
+
+Fruit fruit;
+int direction = 1; // N: 0, E: 1, S: 2, W: 3
+int headIndex = 0;
+unsigned int score = 0;
+bool game_over = false;
+bool turn_clockwise_flag = false;
+bool turn_counter_clockwise_flag = false;
 
 /**
- * Handles the left and right button presses to turn the snake.
+ * Handles the left and right button presses prompt a turn of the snake.
  */
 static void IRAM_ATTR gpio_isr_snake_controller_handler(void *arg) {
     uint32_t gpio_num = (uint32_t) arg;
@@ -54,35 +82,16 @@ static void IRAM_ATTR gpio_isr_snake_controller_handler(void *arg) {
     uint64_t time_since = time - last_key_time;
     ets_printf("gpio_isr_handler %d %d %lld\n", gpio_num, val, time_since);
 
-    // Debounce inputs (15 ms for particularly sticky keys)
-    if (time_since > 150000 && val == 0) {
+    // Debounce inputs
+    if (time_since > 2000 && val == 0) {
         if (gpio_num == GPIO_NUM_0) {
-            turn_counter_clockwise();
+            turn_counter_clockwise_flag = true;
         } else if (gpio_num == GPIO_NUM_35) {
-            turn_clockwise();
+            turn_clockwise_flag = true;
         }
     }
     last_key_time = time;
 }
-
-// Init consts
-const int PIXELS_PER_SEGMENT = 15;
-const int SCORE_PER_FRUIT = 1;
-const int BOUNDING_BOX_WIDTH = 135;
-const int BOUNDING_BOX_HEIGHT = 240 - 15;
-const int X_LIMIT = 9; // 135 / 15
-const int Y_LIMIT = 15; // (240 - 15) / 15
-const int SNAKE_SEGMENT_LIMIT = X_LIMIT * Y_LIMIT; // 135
-
-SnakeSegment snake[135];
-Fruit fruit;
-
-// Init globals
-
-// N: 0, E: 1, S: 2, W: 3
-int direction = 1;
-int x = 0, y = 0;
-int headIndex = 0;
 
 void app_main() {
     // Set buttons as inputs
@@ -97,8 +106,11 @@ void app_main() {
     set_orientation(PORTRAIT);
 
     while (true) {
-        unsigned int score = 0;
-        bool game_over = false;
+        score = 0;
+        game_over = false;
+        turn_clockwise_flag = false;
+        turn_counter_clockwise_flag = false;
+        direction = 2;
  
         // Set initial screen UI
         cls(0);
@@ -107,9 +119,8 @@ void app_main() {
 
         // Wait for left button input
         while(gpio_get_level(0));
-        uint64_t last_time = esp_timer_get_time();
 
-        // Initialize snake
+        // Initialize snake and fruit
         init_snake();
         init_fruit();
 
@@ -121,37 +132,42 @@ void app_main() {
 
         // Game loop
         while (true) {
-            printf("direction %d\n", snake[headIndex].direction);
-
             // Clear screen
             cls(0);
 
+            // Turn snake if button pressed
+            if (turn_clockwise_flag) {
+                direction = (direction + 1) % 4;
+                turn_clockwise_flag = false;
+            }
+            if (turn_counter_clockwise_flag) {
+                direction = (direction + 3) % 4;
+                turn_counter_clockwise_flag = false;
+            }
+
             // Move snake
             move_snake();
-            SnakeSegment head = snake[headIndex];
 
             // Check collisions
-            if (head.x < 0 || head.x > X_LIMIT || head.y < 0 || head.y > Y_LIMIT) {
-                game_over = true;
-            }
-            if (head.x == fruit.x && head.y == fruit.y) {
-                score++;
-                init_fruit();
-            }
+            check_collisions();
+
+            // Check game over
             if (game_over) {
                 // Remove control interrupt handlers
                 gpio_isr_handler_remove(0);
-                gpio_isr_handler_remove(35);                
+                gpio_isr_handler_remove(35);
+                free_snake();
                 break;
             }
 
-            // Draw snake
+            // Draw snake and fruit
             draw_snake();
             draw_fruit();
 
+            // Draw score
             print_score(score);
             flip_frame();
-            vTaskDelay(50);
+            vTaskDelay(20);
         }
 
         // Game over
@@ -161,7 +177,6 @@ void app_main() {
         vTaskDelay(400);
     }
 }
-
 
 void print_instructions() {
     setFont(FONT_DEJAVU18);
@@ -182,15 +197,16 @@ void print_instructions() {
     }
 }
 
-void print_score(unsigned int score) {
+void print_score() {
     setFont(FONT_SMALL);
     char scoreStr[20];
     sprintf(scoreStr, "Score: %d", score);
-    draw_rectangle(0, 0, display_height, 10, BLACK);
+    draw_rectangle(0, 0, display_height, SCORE_PIXELS, BLACK);
+    draw_line(0, SCORE_PIXELS, display_width, SCORE_PIXELS, WHITE);
     print_xy(scoreStr, 2, 2);
 }
 
-void print_final_score(unsigned int score) {
+void print_final_score() {
     setFont(FONT_DEJAVU24);
     char scoreStr[20];
     sprintf(scoreStr, "%d", score);
@@ -198,62 +214,55 @@ void print_final_score(unsigned int score) {
     print_xy(scoreStr, 0, 24);
 }
 
-bool is_left_button_press() {
-    return gpio_get_level(0) == 0;
-}
-
-bool is_right_button_press() {
-    return gpio_get_level(35) == 0;
-}
-
-void turn_clockwise() {
-    snake[headIndex].direction = (snake[headIndex].direction + 1) % 4;
-}
-
-void turn_counter_clockwise() {
-    snake[headIndex].direction = (snake[headIndex].direction + 3) % 4;
-}
-
+/**
+ * Initializes a new snake of size 1 in the center of the screen.
+ */
 void init_snake() {
-    // Init segments as empty
-    for (int i = 0; i < SNAKE_SEGMENT_LIMIT; i++) {
-        snake[i].x = -1;
-        snake[i].y = -1;
-        snake[1].direction = -1;
+    if (snake_tail != NULL) {
+        free_snake();
     }
-    // Init starting segment in center
-    headIndex = 0;
-    snake[0].x = (X_LIMIT / 2) - 1;
-    snake[0].y = Y_LIMIT / 2;
-    snake[0].direction = 1;
+    snake_tail = NULL;
+    SnakeCell *new_cell = (SnakeCell *) malloc(sizeof(SnakeCell));
+    new_cell->x = (X_LIMIT / 2) - 1;
+    new_cell->y = Y_LIMIT / 2;
+    new_cell->next = NULL;
+    snake_tail = new_cell;
+    snake_head = new_cell;
 }
 
+/**
+ * Draws snake from the tail to the head
+ */
 void draw_snake() {
-    for (int i = 0; i < SNAKE_SEGMENT_LIMIT; i++) {
-        if (snake[i].direction == -1) {
-            // End of snake reached
-            break;
-        }
-        // Draw segment with 1px border
+    SnakeCell *current = snake_tail;
+    while (current != NULL) {
         draw_rectangle(
-            (snake[i].x * PIXELS_PER_SEGMENT) + 1,
-            (snake[i].y * PIXELS_PER_SEGMENT) + 1,
+            (current->x * PIXELS_PER_SEGMENT) + 1,
+            (current->y * PIXELS_PER_SEGMENT) + 1 + SCORE_PIXELS,
             PIXELS_PER_SEGMENT - 2,
             PIXELS_PER_SEGMENT - 2,
-            WHITE
+            current->next == NULL ? GREEN : WHITE
         );
+        current = current->next;
     }
 }
 
+/**
+ * Adds a fruit at a random location.
+ * The fruit is allowed to collide with the snake's body cells.
+ */
 void init_fruit() {
     fruit.x = rand() % (X_LIMIT - 1);
     fruit.y = rand() % (Y_LIMIT - 1);
 }
 
+/**
+ * Draws the fruit on the screen.
+ */
 void draw_fruit() {
     draw_rectangle(
         (fruit.x * PIXELS_PER_SEGMENT) + 1,
-        (fruit.y * PIXELS_PER_SEGMENT) + 1,
+        (fruit.y * PIXELS_PER_SEGMENT) + 1 + SCORE_PIXELS,
         PIXELS_PER_SEGMENT - 2,
         PIXELS_PER_SEGMENT - 2,
         RED
@@ -262,36 +271,87 @@ void draw_fruit() {
 
 /**
  * Moves each snake segment.
- * Returns the index of the snake's head.
  */
 void move_snake() {
-    int i;
-    for (i = 0; i < SNAKE_SEGMENT_LIMIT; i++) {
-        switch (snake[i].direction) {
-            // Not a part of snake
-            case -1:
-                headIndex = i - 1;
-                return;
-            // North
-            case 0:
-                snake[i].y--;
-                break;
-            // East
-            case 1:
-                snake[i].x++;
-                break;
-            // South
-            case 2:
-                snake[i].y++;
-                break;
-            // West
-            case 3:
-                snake[i].x--;
-                break;
-            default:
-                headIndex = i - 1;
-                return;
-        }
+    // Tail of the snake
+    if (snake_tail == NULL) {
+        return;
     }
-    headIndex = i;
+    SnakeCell *old_tail = snake_tail;
+    int new_x = snake_head->x;
+    int new_y = snake_head->y;
+
+    if (direction == 0) {
+        new_y--;
+    } else if (direction == 1) {
+        new_x++;
+    } else if (direction == 2) {
+        new_y++;
+    } else if (direction == 3) {
+        new_x--;
+    }
+
+    // Snake head out of bounds
+    if (new_x < 0 || new_x >= X_LIMIT || new_y < 0 || new_y >= Y_LIMIT) {
+        game_over = true;
+        return;
+    }
+
+    // Add new cell for head
+    SnakeCell* new_cell = (SnakeCell *) malloc(sizeof(SnakeCell));
+    new_cell->x = new_x;
+    new_cell->y = new_y;
+    new_cell->next = NULL;
+    snake_head->next = new_cell;
+    snake_head = new_cell;
+
+    if (new_x == fruit.x && new_y == fruit.y) {
+        // Fruit eaten, add new fruit and update score
+        init_fruit();
+        score++;
+    } else {
+        // Fruit not eaten, pop old tail
+        snake_tail = old_tail->next;
+        free(old_tail);
+    }
+}
+
+/**
+ * Deallocates all heap memory for the snake
+ */
+void free_snake() {
+    while (snake_tail != NULL) {
+        SnakeCell* temp = snake_tail;
+        snake_tail = snake_tail->next;
+        free(temp);
+    }
+    snake_tail = NULL;
+    snake_head = NULL;
+}
+
+/**
+ * Prints out each cell in the snake for debugging
+ */
+void print_snake() {
+    int i = 0;
+    SnakeCell* current = snake_tail;
+    while (current != NULL) {
+        printf("cell %d, p: %p, x: %d, y: %d\n", i, current, current->x, current->y);
+        current = current->next;
+    }
+    printf("\n");
+}
+
+/**
+ * Checks if the snake head collides with any part of the body, O(n) time.
+ */
+void check_collisions() {
+    SnakeCell *current = snake_tail;
+    while (current != snake_head) {
+        if (current->x == snake_head->x && current->y == snake_head->y) {
+            game_over = true;
+            return;
+        }
+        current = current->next;
+    }
 }
