@@ -18,8 +18,6 @@
 void print_instructions();
 void print_score();
 void print_final_score();
-bool is_left_button_press();
-bool is_right_button_press();
 void init_snake();
 void move_snake();
 void draw_snake();
@@ -46,12 +44,11 @@ typedef struct Fruit Fruit;
 
 const int PIXELS_PER_SEGMENT = 15;
 const int SCORE_PER_FRUIT = 1;
-const int BOUNDING_BOX_WIDTH = 135;
-const int BOUNDING_BOX_HEIGHT = 240 - 15;
 const int SCORE_PIXELS = 15;
+const int BOUNDING_BOX_WIDTH = 135;
+const int BOUNDING_BOX_HEIGHT = 240 - SCORE_PIXELS;
 const int X_LIMIT = 9; // 135 / 15
 const int Y_LIMIT = 15; // (240 - 15) / 15
-const int SNAKE_SEGMENT_LIMIT = X_LIMIT * Y_LIMIT; // 135
 
 // Snake is a linked-list of cells
 // snake_tail is the head of the list
@@ -62,7 +59,6 @@ const int SNAKE_SEGMENT_LIMIT = X_LIMIT * Y_LIMIT; // 135
 // snake_tail              snake_head
 SnakeCell *snake_tail = NULL;
 SnakeCell *snake_head = NULL;
-
 Fruit fruit;
 int direction = 1; // N: 0, E: 1, S: 2, W: 3
 int headIndex = 0;
@@ -72,7 +68,7 @@ bool turn_clockwise_flag = false;
 bool turn_counter_clockwise_flag = false;
 int speeds[] = { 50, 30, 20, 15 };
 char *difficulty_names[] = { "easy", "medium", "hard", "expert" };
-bool difficulty = 0;
+int difficulty = 0;
 
 /**
  * Handles the left and right button presses prompt a turn of the snake.
@@ -168,7 +164,7 @@ void app_main() {
             draw_fruit();
 
             // Draw score
-            print_score(score);
+            print_score();
 
             // Draw and wait
             flip_frame();
@@ -177,7 +173,7 @@ void app_main() {
 
         // Game over
         cls(0);
-        print_final_score(score);
+        print_final_score();
         flip_frame();
         vTaskDelay(400);
     }
